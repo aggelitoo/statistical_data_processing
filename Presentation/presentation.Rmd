@@ -1,0 +1,60 @@
+---
+title: "The Right Spotify Playlist for the Occassion"
+author: "August Jonasson (@aggelitoo)"
+date: "2023-01-12"
+output:
+  ioslides_presentation:
+    logo: SU_logo_CMYK.png
+    incremental: TRUE
+    css: slides.css
+---
+
+```{r setup, include=FALSE}
+library(imager)
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Introduction
+- Scraping tracks from the Spotify top lists from all over the world
+- Using Spotify API to enrich tracks with audio features
+- Automatically generating playlists based on emotion to facilitate
+- Creating the playlists in R through the Spotify API
+- Presentation focus on audio features -> creating playlists
+
+## Mood variables
+- Valence (positive/negative)
+- Energy (high/low)
+- Tempo (beats per minute) - playlist coherence
+
+## Combinations of valence/energy
+- High valence, high energy: **Happy/delighted**
+- High valence, low energy: **Relaxed/mellow**
+- Low valence, low energy: **Sad/depressed**
+- Low valence, high energy: **Angry/frustrated**
+
+## Valence/energy
+
+```{r, echo=FALSE}
+example_songs_plot <- load.image("plots/example_plot.png")
+plot(example_songs_plot)
+```
+
+## Trying to create a Sad Playlist
+
+- Restricting the playlist by geograpical popularity (Nordic countries)
+- Choosing songs with low valence/energy
+- BPM below 100 (for coherence)
+
+## Selection of songs
+```{r cars, echo = FALSE}
+nordic_sad_plot <- load.image("plots/nordic_sad_plot.png")
+plot(nordic_sad_plot)
+```
+
+## Conclusions
+
+- Geographical/cultural restriction contribute to coherence
+- Holiday music (filtering)
+- Many more variables and combinations to explore
+- Thank you for listening!
+

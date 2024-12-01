@@ -1,0 +1,10 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.csv
+Homework/hw_data/
+*.html
+*.mp4
+*.ppx
+.httr-oauth

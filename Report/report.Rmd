@@ -1,0 +1,458 @@
+---
+title: The Right Spotify Playlist for the Occasion
+author: August Jonasson (@aggelitoo)
+date: 2023-01-10
+output:
+  html_document:
+    self_contained: true
+    toc: true
+    toc_depth: 2
+---
+
+# Abstract
+
+In this report we go use RSelenium to scrape the most popular tracks in the
+world for the year 2022, from the Spotify top charts.
+We then enrich the data with audio features such as valence, energy
+and tempo using the Spotofy API and the R wrapper spotifyr. In the end, we use
+these  variables in combination with the other data in order to automatically
+generate two playlists, according to some emotion we want to facilitate.
+We believe one of the playlists was a success, and the other one not so much,
+and we believe the reason for this is that the second playlist wasn't
+geographically restricted enough, while the first one was.
+
+# Introduction
+
+A lot of us use music in order to facilitate an emotion or make a task easier
+to perform. When we have gone through a difficult break-up we look for music
+that validates our sad feelings, and when we decide to have a pizza baking Friday
+night, we want the music that sets the perfect atmosphere for kneading that
+dough like a true Italian master.
+
+Often times, however, we have to spend a lot of time
+finding the right music, and creating the playlists that we require - and then
+also having to re-create playlists that we have grown tired of. Wouldn't it be
+nice if there was a way to automatically create the playlist you are looking for,
+while at the same time ensuring some aspect of novelty?
+
+Well, that might not be that far off (it is already somewhat here)!
+In this report we will make a brief
+exploration into this subject through the use of Spotify. We will first seek
+out the most popular music (on Spotify) from around the globe, for the year 2022,
+and then enrich
+the tracks with features provided by the Spotify API. These feataures
+include several different parameters, such as danceability, valence, energy and
+tempo, just to name the ones focused solely on the "Mood" of the track. In this
+project we will focus solely on the valence, energy and tempo parameters in order
+to create playlists. Through different combinations of valence and energy, one
+should be able to mimic emotions such as happy, sad, angry and relaxed. The
+tempo variable will be used to make the playlists feel coherent. More on these
+variables later in the report.
+
+The full spectrum of the spotify audio features can be found [here](https://developer.spotify.com/discover/#audio-features-analysis).
+
+This report is intended as a guide/introduction into the world of generating
+playlists automatically through the use of R, web scraping spotify weekly charts
+using RSelenium, and the Spotify for Developers API using the R wrapper spotifyr.
+A lot of emphasis will be put on the actual gathering of the data, since regular
+web scraping doesn't work on the Spotify charts. When the data has been gathered,
+some very basic examples of playlist building will be shown.
+
+As such, the reader should be familiar with R Tidyverse and, perhaps,
+like listening to music. An interest in psychology and affect models will
+definitely elevate the experience as well.
+
+# Data acquisition
+
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+library(tidyverse)
+library(lubridate)
+library(spotifyr)
+library(rvest)
+library(RSelenium)
+```
+
+First step is to scrape historical data from the Spotify charts URLs. These
+have to be gathered per week, per country, in order to build a larger data frame
+consisting of all countries and their top songs over the whole year. This will
+be one of the more challenging parts of this project, since the site is guarded
+behind a login page, and the use of rvest in order to get through this page
+isn't possible. We therefor have to use RSelenium in order to create a script
+that automates the gathering of the data through a regular web browser. The
+current documentation for RSelenium can be found
+[here](https://www.rdocumentation.org/packages/RSelenium/versions/1.7.9).
+
+There are csv files available on the Spotify charts website, but only per week
+and country. Therefore, we want to automate the downloading of these csv files,
+and then create one large data frame out of the ~3500 csv files that we gather.
+
+First, lets create the vectors that we need in order to iterate through
+the spotify charts URLs.
+```{r}
+# these variables will be used for both scraping and csv_reading
+
+# all the week-ends of 2022 (Jan - Nov)
+date_range <- seq(ymd('2022-01-06'),ymd('2022-12-01'), by = '1 week')
+
+# all countries available on spotify charts, by two letter country code
+countries = c("ar", "au", "at", "by", "be", "bo", "br", "bg", "ca", "cl", "co",
+              "cr", "cy", "cz", "dk", "do", "ec", "eg", "sv", "ee", "fi", "fr",
+              "de", "gr", "gt", "hn", "hk", "hu", "is", "in", "id", "ie", "il",
+              "it", "jp", "kz", "lv", "lt", "lu", "my", "mx", "ma", "nl", "nz",
+              "ni", "ng", "no", "pk", "pa", "py", "pe", "ph", "pl", "pt", "ro",
+              "sa", "sg", "sk", "za", "kr", "es", "se", "ch", "tw", "th", "tr",
+              "ae", "ua", "gb", "uy", "us", "ve", "vn")
+```
+
+Now, we can run the following script in order to gather all of the csv files.
+One initial, manual, login to the Spotify charts website has to performed with
+the Spotify account that should be used, in order to accept the terms of the
+site. [This](https://charts.spotify.com) is the Spotify charts site. The
+following code chunk automates over 10 thousand clicks that are needed to download
+the data and takes several hours to run.
+```{r, message=FALSE, eval=FALSE}
+# Spotify account credentials
+user <- "studentgarbage@gmail.com"  # this account was created for this project
+password <- "Losenord1234567890"    # and doesn't contain any sensitive information
+
+# setting up the browser to be used in the script
+rD <- rsDriver(browser = "firefox", chromever = NULL)
+remDr <- rD[['client']]
+remDr$navigate("https://accounts.spotify.com/sv/login?continue=https%3A%2F%2Fcharts.spotify.com/login")
+
+# logging in to the spotify charts website, in order to access the charts
+remDr$findElement(using = "id", value = "login-username")$sendKeysToElement(list(user))
+remDr$findElement(using = "id", value = "login-password")$sendKeysToElement(list(password))
+remDr$findElement(using = "id", value = "login-button")$clickElement()
+
+# clicking accept cookies popup
+Sys.sleep(3)
+remDr$findElement(using = "id", value = "onetrust-accept-btn-handler")$clickElement()
+
+# function to download all the weekly charts for each week, for each country
+# we use 'possibly' to wrap function since not all weekly charts are available
+# files are downloaded to whatever default downloaded files folder
+map(countries, function(x){
+      map(date_range, possibly(function(y) {
+        # navigating to the week/country site
+        remDr$navigate(str_c("https://charts.spotify.com/charts/view/regional-",
+                             x, "-weekly/", as.character(y)))
+        Sys.sleep(2)
+        # finding the download csv file button and clicking it
+        remDr$findElement(using = "xpath",
+                          value = "/html/body/div/div/div/main/div[2]/div[3]/div/div/a/button")$clickElement()
+      }, otherwise = NULL))
+})
+```
+
+Now, that we have gathered all of the weekly charts for 2022, from around the
+world, as csv files - we can build the actual data frame. We then save it as an
+RData file in order to avoid having to re-create it on each run.
+```{r, eval=FALSE, message=FALSE}
+# ca 3500 csv files, 200 rows per file - takes some time to compile
+charts_df <- map_df(countries, function(x){
+  map(date_range, possibly(function(y) {
+    read_csv(str_c("spotify_csv_files/regional-", x, "-weekly-", as.character(y), ".csv")) %>%
+      mutate(country = x, week_end = y)
+  }, otherwise = NULL))
+})
+
+# then saving the data frame as .RData to avoid having to rerun this code
+save(charts_df, file = "project_RData/charts.RData")
+```
+
+Second step is to use the Spotify API in order to retrieve the "Mood"
+variables (valence, energy and tempo), of the tracks, and join
+this with the data frame we just created. We use the R wrapper spotifyr to do
+this.
+
+In order to perform this step, one has to create a Spotify for Developers
+account (regular spotify account can be used). Otherwise, an access token can't
+be fetched, and the Spotify API won't work
+([Spotify for Developers](https://developer.spotify.com/dashboard/login)).
+Create an app on the developer dashboard and find its credentials (id and secret).
+
+Since the API only allows for 100 calls at a time, when fetching track features,
+we have to first identify all of the unique songs and then break them up into
+chunks of 100. We can then proceed with the fetching of the features.
+```{r, echo=FALSE, message=FALSE}
+# authentication, in order to start fetching feature data from spotify api
+# id and secret are spotify for developers project credentials
+id <- 'ac4d8e6092014430ad715955013b36ea'
+secret <- '9c39a489ca794a6d8bfc68e98b742d60'
+Sys.setenv(SPOTIFY_CLIENT_ID = id)
+Sys.setenv(SPOTIFY_CLIENT_SECRET = secret)
+access_token <- get_spotify_access_token()
+```
+
+
+```{r, cache=TRUE, eval=FALSE}
+# loading the data
+load("project_RData/charts.RData")
+
+# create a vector of songs that appear in the df, by their unique URI
+unique_tracks <- charts_df %>%
+  pull(uri) %>%
+  unique() %>%
+  str_remove(pattern = "spotify:track:") # to get Track ID, to use spotifyr
+
+# breaking up tracks into chunks of 100
+chunk_length <- 100
+chunked_unique_tracks <- c(split(unique_tracks, ceiling(seq_along(unique_tracks) / chunk_length)))
+
+# calling 100 songs at a time from the api to get features for all songs
+features_df <- map_dfr(chunked_unique_tracks, ~ get_track_audio_features(.x))
+
+# we also might want to fortify the data by adding country names and continents
+# check sources for url to this data
+country_and_continent_codes <- read_csv("project_RData/country_and_continent_codes.csv") %>%
+  mutate(Two_Letter_Country_Code = tolower(Two_Letter_Country_Code))
+
+# we can now finally create a complete data frame, with tracks, features, week
+# dates when the songs were popular, and country and continent
+charts_features_df <- charts_df %>%
+  left_join(country_and_continent_codes, by = c("country" = "Two_Letter_Country_Code")) %>%
+  left_join(features_df, by = "uri")
+
+# saving this data frame as well, in order to avoid having to call API each time
+save(charts_features_df, file = "project_RData/charts_features.RData")
+```
+
+```{r, echo=FALSE}
+load("project_RData/charts_features.RData")
+head(charts_features_df, 5)
+```
+We now finally have everything that we need in order to start experimenting
+with the mood variables and create some playlists.
+
+# Creating some playlists
+
+This is a good spot to explain the Mood variables a bit more in dept. These are
+the descriptions that Spotify give in their API documumentation.
+
+ - Valence: A measure from 0.0 to 1.0 describing the musical positiveness conveyed by a track. Tracks with high valence sound more positive (e.g. happy, cheerful, euphoric), while tracks with low valence sound more negative (e.g. sad, depressed, angry).\
+ - Energy: Energy is a measure from 0.0 to 1.0 and represents a perceptual measure of intensity and activity. Typically, energetic tracks feel fast, loud, and noisy. For example, death metal has high energy, while a Bach prelude scores low on the scale. Perceptual features contributing to this attribute include dynamic range, perceived loudness, timbre, onset rate, and general entropy.\
+ - Tempo: The overall estimated tempo of a track in beats per minute (BPM). In musical terminology, tempo is the speed or pace of a given piece and derives directly from the average beat duration.
+
+Now, if one were to examine the energy/valence relationship visually, with
+valence on the x-axis and energy on the y-axis (centered around zero),
+a psychologist might be eager to
+say that observations further into the first quadrant represent feelings of
+happiness and delight, the second quadrant would be anger and frustration, the
+third sadness and depression, and the fourth would finally be something akin to
+feeling relaxed and content (to name them very roughly).
+
+Here are some example tracks, shown in this context, that you might recognize,
+or be able to imagine what they sound like.
+
+```{r, message=FALSE, echo=FALSE}
+example_songs <- charts_features_df %>%
+  select(track_name, artist_names, valence, energy, tempo, uri) %>%
+  mutate(valence = valence - 0.5,
+         energy = energy - 0.5) %>%
+  mutate(track_artist = str_c(track_name, artist_names, sep = " - ")) %>%
+  distinct() %>%
+  filter((track_name == "Dancing Queen") | (track_name == "Hive Mind") |
+           (track_name == "Something In The Way") | track_name == "Africa")
+
+example_plot <- example_songs %>%
+  ggplot(aes(x=valence, y=energy, shape = track_artist)) +
+  geom_point(size = 4) +
+  geom_vline(xintercept = 0) +
+  geom_hline(yintercept = 0) +
+  xlim(-0.5, 0.5) +
+  ylim(-0.5, 0.5) +
+  geom_label(x=-0.3, y=0.32, label = "Angry/Turbulent", color = "red") +
+  geom_label(x=-0.3, y=-0.32, label = "Sad/Depressed", color = "blue") +
+  geom_label(x=0.3, y=0.32, label = "Happy/Delighted", color = "green") +
+  geom_label(x=0.3, y=-0.32, label = "Relaxed/Mellow", color = "purple") +
+  ggtitle("Valence/energy relationship of some popular songs")
+
+example_plot
+```
+
+Let's set a goal for this project to create two playlists. One slow sad/depressed
+playlist from the Nordic countries' charts, and one happy and upbeat playlist
+pulling tracks from the entire world.
+
+When we create the sad playlist, we only use songs with a tempo of below 100 bpm,
+since songs faster than this might go against the feeling we are looking for.
+
+```{r}
+nordic_sad <- charts_features_df %>%
+  # only the nordic charts for 2022
+  filter(country %in% c("se", "no", "fi", "dk", "is")) %>%
+  select(track_name, artist_names, valence, energy, tempo, uri) %>%
+  mutate(valence = valence - 0.5, energy = energy - 0.5) %>%
+  distinct() %>% # don't want duplicate songs
+  # getting some, allegedly, sad songs - based on tempo as well
+  filter(valence < -0.2 & energy < -0.1 & tempo < 100)
+
+head(nordic_sad, 5)
+```
+
+These are the resulting tracks visualized on the valence/energy plot.
+
+```{r, echo=FALSE}
+nordic_sad_plot <- nordic_sad %>%
+  ggplot(aes(x=valence, y=energy)) +
+  geom_point(size = 0.3) +
+  geom_vline(xintercept = 0) +
+  geom_hline(yintercept = 0) +
+  xlim(-0.5, 0.5) +
+  ylim(-0.5, 0.5) +
+  geom_label(x=-0.3, y=0.32, label = "Angry/Turbulent", color = "red") +
+  geom_label(x=-0.3, y=-0.32, label = "Sad/Depressed", color = "blue") +
+  geom_label(x=0.3, y=0.32, label = "Happy/Delighted", color = "green") +
+  geom_label(x=0.3, y=-0.32, label = "Relaxed/Mellow", color = "purple") +
+  ggtitle("(Allegedly) Sad songs popular in the Nordic countries 2022")
+
+nordic_sad_plot
+```
+
+Now, we can pick out a playlist. We are doing this using a set seed in order to
+keep the sampling from these songs consistent. If we are not happy with the
+playlist, or, if we grow tired of it - we can just change the seed. A good
+playlist length might around 25 songs, so let's use this.
+
+Lets create a playlist using spotifyr.
+More details on the spotifyr package can be found
+[here](https://www.rdocumentation.org/packages/spotifyr/versions/2.1.1).
+
+```{r, message=FALSE, eval=FALSE}
+# create the actual playlist using spotifyr
+create_playlist(user_id = "31m5lue5uif6evna5thejrywzzgi",
+                name = "nordic_sad")
+```
+
+And creating a script that automatically generates 25 songs into the playlist.
+Changing the seed results in a completely new "sad" playlist. Check the playlist
+out [here](https://open.spotify.com/playlist/3VDGx8xrXeoJlSgXfi5NQx?si=4fc9ec3beead4147).
+It was definitely a success!
+```{r, eval=FALSE}
+# getting songs to be put in playlist as a vector of their uri:s
+set.seed(2)
+nordic_sad_tracks <- nordic_sad %>%
+  sample_n(25) %>%
+  pull(uri)
+
+# getting id of the playlist in order to manipulate it
+playlist_id <- get_my_playlists() %>%
+  filter(name == "nordic_sad") %>%
+  pull(id)
+
+# removing all the current playlist tracks
+current_playlist_tracks <- get_playlist_tracks(playlist_id = playlist_id)$track.uri
+remove_tracks_from_playlist(playlist_id = playlist_id, uris = current_playlist_tracks)
+
+# adding the new tracks to the playlist
+add_tracks_to_playlist(playlist_id = playlist_id, uris = nordic_sad_tracks)
+```
+
+We can now move on to the next playlist, the international happy/upbeat one.
+Since we are basically just repeating the same process, but with some few
+tweaks, we leave the code for this out of the report.
+
+```{r, include=FALSE}
+international_happy_upbeat <- charts_features_df %>%
+  select(uri, tempo, valence, energy) %>%
+  distinct() %>%
+  # centering aroung zero
+  mutate(valence = valence - 0.5,
+         energy = energy - 0.5) %>%
+  # now only using tempos above 140 bpm
+  filter(valence > 0.2 & energy > 0.2 & tempo > 140)
+```
+
+Here is a sample plot.
+
+```{r, echo=FALSE, cache=TRUE}
+set.seed(1)
+international_happy_upbeat_plot <- international_happy_upbeat %>%
+  sample_n(500) %>%
+  ggplot(aes(x=valence, y=energy)) +
+  geom_point(size = 0.3) +
+  geom_vline(xintercept = 0) +
+  geom_hline(yintercept = 0) +
+  xlim(-0.5, 0.5) +
+  ylim(-0.5, 0.5) +
+  geom_label(x=-0.3, y=0.32, label = "Angry/Turbulent", color = "red") +
+  geom_label(x=-0.3, y=-0.32, label = "Sad/Depressed", color = "blue") +
+  geom_label(x=0.3, y=0.32, label = "Happy/Delighted", color = "green") +
+  geom_label(x=0.3, y=-0.32, label = "Relaxed/Mellow", color = "purple") +
+  ggtitle("Sample of (allegedly) happy songs popular in the world 2022 (n=500)")
+
+international_happy_upbeat_plot
+```
+
+```{r, eval=FALSE, echo=FALSE}
+# create the actual playlist using spotifyr
+create_playlist(user_id = "31m5lue5uif6evna5thejrywzzgi",
+                name = "international_happy_upbeat")
+```
+
+```{r, eval=FALSE, echo=FALSE}
+# getting songs to be put in playlist as a vector of their uri:s
+set.seed(5)
+international_happy_upbeat_tracks <- international_happy_upbeat %>%
+  sample_n(25) %>%
+  pull(uri)
+
+# getting id of the playlist in order to manipulate it
+playlist_id <- get_my_playlists() %>%
+  filter(name == "international_happy_upbeat") %>%
+  pull(id)
+
+# removing all the current playlist tracks
+current_playlist_tracks <- get_playlist_tracks(playlist_id = playlist_id)$track.uri
+remove_tracks_from_playlist(playlist_id = playlist_id, uris = current_playlist_tracks)
+
+# adding the new tracks to the playlist
+add_tracks_to_playlist(playlist_id = playlist_id, uris = international_happy_upbeat_tracks)
+```
+
+[Here](https://open.spotify.com/playlist/4RhNWRLFs85zlJp3KYwx2B?si=e8bf4f5c66c94225)
+is the resulting playlist. It is definitely harder to call this a success. The
+playlist feels too chaotic. This is probably due to the fact that we pulled songs
+from all over the world. The tempos might be matching, but since there are so
+many different languages, it is hard to find a common theme throughout the playlist.
+In the case of a feeling such as happiness, it might be a better idea to have
+some type of geographical restriction to the tracks' popularity.
+
+# Conclusions and reflections
+
+There are way more playlists that one can create using only the
+valence, energy and tempo variables. The ones we have created in this report
+only serve as an example as to how to work with the variables. For example,
+one could try making the sampling more sophisticated than the sort of
+"rectangular" sampling that we used. As an example, it would be interesting to
+see what kind of results are yielded by exploring the borders between quadrants.
+
+In addition to the variables we used for this project, there are many more -
+check out the charts_features_df in order to get the full scope of the audio
+features provided by Spotify.
+If one were to incorporate some of these into the valence/energy mix, as well
+as music genre and geopgraphical restrictions - it would probably be possible
+to create playlists based on pretty specific requirements.
+
+All in all, I hope this report served to inspire the readers' imagination of the
+possibilities of automatically creating playlists in Spotify.
+
+```{r, include=FALSE, eval=FALSE}
+# saving plots for presentation purposes
+ggsave("../Presentation/plots/example_plot.png", plot = example_plot,
+       width = 8, height = 5)
+ggsave("../Presentation/plots/nordic_sad_plot.png", plot = nordic_sad_plot,
+       width = 8, height = 5)
+ggsave("../Presentation/plots/international_happy_upbeat_plot.png",
+       plot = international_happy_upbeat_plot,
+       width = 8, height = 5)
+```
+
+
+# Sources
+[spotifyr](https://www.rcharlie.com/spotifyr/)\
+[exploring spotify with r tutorial](https://msmith7161.github.io/what-is-speechiness/)\
+[RSelenium tutorial](http://joshuamccrain.com/tutorials/web_scraping_R_selenium.html)\
+[Country codes and contient](https://gist.githubusercontent.com/stevewithington/20a69c0b6d2ff846ea5d35e5fc47f26c/raw/13716ceb2f22b5643ce5e7039643c86a0e0c6da6/country-and-continent-codes-list-csv.csv)\
+[Spotify audio track features docs](https://developer.spotify.com/documentation/web-api/reference/#/operations/get-several-audio-features)\

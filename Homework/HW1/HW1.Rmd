@@ -1,0 +1,60 @@
+---
+title: "Homework 1"
+author: August Jonasson
+date: 2022-11-10
+output: github_document
+---
+
+### Brief description of my past experiences
+The only past experiences I have with R, R Studio and R Markdown are those which I attained in the "Sannolikhetsteori 1" course, which are next to none, since we were handed all of the code needed to complete the assignments. Our main focus was to examine and draw conclusions from the results that followed.
+
+As a result, my past experiences with dplyr and ggplot2 are non-existent.
+
+Git and Github, on the other hand, I have some experience with. I was introduced to git in the "Datalogi för matematiker" course, where we were required to use a github repo for our final course-projects. I am therefor familiar with using the basic operations from the terminal, such as add, commit, push, pull and clone.
+
+I also used github, although not very extensively, during my summer internship. This mainly helped me cement what I had already learnt during the computer science course.
+
+### Assignment
+I think volcanoes are pretty cool, so I found **The Significant Volcanic Eruption Database** (top Google result), which is a global listing of over 500 significant volcanic eruptions, dating all the way back to year -4360. To see what classifies as "significant", and more, here is the  [Source](https://public.opendatasoft.com/explore/dataset/significant-volcanic-eruption-database/information/) of the data.
+
+We start with loading the data into a tibble data frame
+```{r include=FALSE}
+library(tidyverse)
+```
+```{r message=FALSE}
+# since the acquired csv file was semi-colon separated, we use read_csv2
+eruptions <- read_csv2("significant-volcanic-eruption-database.csv")
+```
+Now, lets come up with something to examine. We know that our close neighbors, Iceland, have a lot of volcanic activity. We also know that Indonesia is pretty famous for their volcanoes. Lets filter them out to try and see if anything stands out.
+```{r}
+# creating a data frame only containing eruptions from Iceland and Indonesia
+# also sort out all observations that have missing Volcanic Explosivity Indices
+iceland_indonesia <- eruptions %>%
+  filter(Country %in% c("Iceland", "Indonesia")) %>%
+  filter(is.na(`Volcanic Explosivity Index`) == FALSE)
+```
+Upon examining the data, we notice that the casualties count for each eruption has a lot of missing values before the year 1750. Therefor, we decide to filter them out too, as well as the missing values.
+```{r}
+iceland_indonesia_1750_ <- iceland_indonesia %>%
+  filter(Year > 1750, is.na(`Volcano : Deaths`) == FALSE) 
+```
+Now, lets plot something
+```{r}
+# scatter plot of casualties due to volcanic eruptions
+ggplot(iceland_indonesia_1750_, aes(x=Year, y=`Volcano : Deaths`,
+                                    size=`Volcanic Explosivity Index`)) +
+  geom_point() + 
+  scale_y_log10() + 
+  facet_wrap(~ Country) + 
+  ggtitle("Casualties due to volcanic eruptions in Iceland and Indonesia since
+          1750")
+```
+
+The Indonesian volcanoes have certainly had more devastating effects on humanity than the Icelandic ones, during the last 300-ish years. However, upon further inspection of the data, we realize that these deaths are actually not a direct cause of the actual explosion. Most deaths occur because of the ash that falls over very large areas (for sometimes years after the actual eruption), causing buildings to collapse. Mud-flows are apparently a huge contributing factor as well. The resulting casualties are sometimes not even mainly from the country in which the eruption took place. 
+
+Because of this realization, that the data is very complex, we decide to stop here. Maybe this could be something for the project.
+
+```{r echo=FALSE}
+sessionInfo()
+```
+
